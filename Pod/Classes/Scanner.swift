@@ -13,7 +13,8 @@ open class Scanner: NSObject {
     }
     
     open class func stop() {
-        self.shared.centralManager.stopScan()
+        self.shared._centralManager?.stopScan()
+        self.shared._centralManager = nil
         self.shared.delegate = nil
     }
     
