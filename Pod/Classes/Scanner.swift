@@ -3,15 +3,16 @@ import CoreBluetooth
 open class Scanner: NSObject {
     
     //MARK: Public
-    open class func start(_ delegate: ScannerDelegate) {
-        
-        self.shared.centralManager = CBCentralManager(delegate: self.shared, queue: nil)
-        self.shared.delegate = delegate
-        
+    open class func restoreCentralManager(identifier: String) {
+        self.shared._centralManager = CBCentralManager(delegate: self.shared, queue: nil,
+                                                       options: [CBCentralManagerOptionRestoreIdentifierKey : identifier])
+    }
+    
+    open class func start() {
+        self.shared._centralManager = CBCentralManager(delegate: self.shared, queue: nil, options:nil)
     }
     
     open class func stop() {
-        
         self.shared.centralManager.stopScan()
         self.shared.delegate = nil
     }
@@ -73,7 +74,7 @@ open class Scanner: NSObject {
                     url = urlFrame.url as URL
                 }
                 
-                let generic = Generic(url: url, namespace: namespace, instance: instance, signalStrength: beacon.signalStrength, identifier: beacon.identifier)
+                let generic = Generic(url: url, namespace: namespace, instance: instance, signalStrength: beacon.signalStrength, rssi: Int(beacon.rssi), txPower: beacon.txPower, distance: beacon.distance, identifier: beacon.identifier)
                 if let tlmFrame = beacon.frames.tlm {
                     generic.parseTlmFrame(tlmFrame)
                 }
@@ -92,7 +93,10 @@ open class Scanner: NSObject {
     static let eddystoneServiceUUID = CBUUID(string: "FEAA")
     
     //MARK: Properties
-    var centralManager = CBCentralManager()
+    var _centralManager: CBCentralManager!
+    var centralManager: CBCentralManager {
+        return _centralManager
+    }
     var discoveredBeacons = [String: Beacon]()
     var beaconTimers = [String: Timer]()
     
@@ -102,8 +106,16 @@ open class Scanner: NSObject {
         self.delegate?.eddystoneNearbyDidChange()
     }
     
+    public class var delegate: ScannerDelegate? {
+        get { return shared.delegate }
+        set {
+            shared.delegate = newValue
+            shared.delegate?.eddystoneNearbyDidChange()
+        }
+    }
+    
     //MARK: Internal Class
-    class var beacons: [Beacon] {
+    public class var beacons: [Beacon] {
         get {
             var orderedBeacons = [Beacon]()
             
@@ -125,7 +137,8 @@ extension Scanner: CBCentralManagerDelegate {
     
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
         if central.state == .poweredOn {
-            central.scanForPeripherals(withServices: [Scanner.eddystoneServiceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+            log("Bluetooth is powered on. Begin scan...")
+            self.centralManager.scanForPeripherals(withServices: [Scanner.eddystoneServiceUUID], options:nil)
         } else {
             log("Bluetooth not powered on. Current state: \(central.state)")
         }
@@ -134,10 +147,11 @@ extension Scanner: CBCentralManagerDelegate {
     public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
         let identifier = peripheral.identifier.uuidString
 
+        let rssi = RSSI.intValue
         if let beacon = self.discoveredBeacons[identifier] {
-            beacon.parseAdvertisementData(advertisementData, rssi: RSSI.doubleValue)
+            beacon.parseAdvertisementData(advertisementData, rssi: rssi)
         } else {
-            if let beacon = Beacon.beaconWithAdvertisementData(advertisementData, rssi: RSSI.doubleValue, identifier: identifier) {
+            if let beacon = Beacon.beaconWithAdvertisementData(advertisementData, rssi: rssi, identifier: identifier) {
                 beacon.delegate = self
                 self.discoveredBeacons[peripheral.identifier.uuidString] = beacon
                 self.notifyChange()
@@ -155,6 +169,10 @@ extension Scanner: CBCentralManagerDelegate {
             self.discoveredBeacons.removeValue(forKey: identifier)
             self.notifyChange()
         }
+    }
+    
+    public func centralManager(_ central: CBCentralManager, willRestoreState dict: [String : Any]) {
+        
     }
 }
 

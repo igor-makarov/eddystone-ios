@@ -22,12 +22,16 @@ open class Beacon {
     
     //MARK: Properties
     var txPower: Int
-    var identifier: String
-    var rssi: Double {
+    public var identifier: String
+    public var rssi: Double {
         get {
+            if self.rssiBuffer.isEmpty {
+                return 0
+            }
+            
             var totalRssi: Double = 0
             for rssi in self.rssiBuffer {
-                totalRssi += rssi
+                totalRssi += Double(rssi)
             }
             
             let average: Double = totalRssi / Double(self.rssiBuffer.count)
@@ -35,7 +39,7 @@ open class Beacon {
         }
     }
     var signalStrength: SignalStrength = .unknown
-    var rssiBuffer = [Double]()
+    var rssiBuffer = [Int]()
     var distance: Double {
         get {
             return Beacon.calculateAccuracy(txPower: self.txPower, rssi: self.rssi)
@@ -43,7 +47,7 @@ open class Beacon {
     }
     
     //MARK: Initializations
-    init(rssi: Double, txPower: Int, identifier: String) {
+    init(rssi: Int, txPower: Int, identifier: String) {
         self.txPower = txPower
         self.identifier = identifier
         
@@ -57,9 +61,12 @@ open class Beacon {
     }
     
     //MARK: Functions
-    func updateRssi(_ newRssi: Double) -> Bool {
+    func updateRssi(_ newRssi: Int) {
+        if (newRssi == 127) {
+            return
+        }
         self.rssiBuffer.insert(newRssi, at: 0)
-        if self.rssiBuffer.count >= 20 {
+        if self.rssiBuffer.count > 1 {
             self.rssiBuffer.removeLast()
         }
         
@@ -69,7 +76,6 @@ open class Beacon {
             self.notifyChange()
         }
         
-        return false
     }
     
     //MARK: Calculations
@@ -101,11 +107,11 @@ open class Beacon {
             return .veryLow
         }
     }
-
+    
     //MARK: Advertisement Data
-    func parseAdvertisementData(_ advertisementData: [AnyHashable: Any], rssi: Double) {
+    func parseAdvertisementData(_ advertisementData: [AnyHashable: Any], rssi: Int) {
         self.updateRssi(rssi)
-        
+
         if let bytes = Beacon.bytesFromAdvertisementData(advertisementData) {
             if let type = Beacon.frameTypeFromBytes(bytes) {
                 switch type {
@@ -113,7 +119,7 @@ open class Beacon {
                     if let frame = UrlFrame.frameWithBytes(bytes) {
                         if frame.url != self.frames.url?.url {
                             self.frames.url = frame
-                            log("Parsed URL Frame with url: \(frame.url)")
+                            log("Parsed URL Frame with url: \(frame.url) Distance: \(String(format: "%.2f", distance)) (-\(-rssi)/\(-txPower))")
                             self.notifyChange()
                         }
                     }
@@ -121,14 +127,14 @@ open class Beacon {
                     if let frame = UidFrame.frameWithBytes(bytes) {
                         if frame.uid != self.frames.uid?.uid {
                             self.frames.uid = frame
-                            log("Parsed UID Frame with uid: \(frame.uid)")
+                            log("Parsed UID Frame with uid: \(frame.uid) Distance: \(String(format: "%.2f", distance)) (-\(-rssi)/\(-txPower))")
                             self.notifyChange()
                         }
                     }
                 case .tlm:
                     if let frame = TlmFrame.frameWithBytes(bytes) {
                         self.frames.tlm = frame
-                        log("Parsed TLM Frame with battery: \(frame.batteryVolts) temperature: \(frame.temperature) advertisement count: \(frame.advertisementCount) on time: \(frame.onTime)")
+                        log("Parsed TLM Frame with battery: \(frame.batteryVolts) temperature: \(frame.temperature) advertisement count: \(frame.advertisementCount) on time: \(frame.onTime) Distance: \(String(format: "%.2f", distance)) (-\(-rssi)/\(-txPower))")
                         self.notifyChange()
                     }
                 }
@@ -137,7 +143,7 @@ open class Beacon {
     }
     
     //MARK: Bytes
-    class func beaconWithAdvertisementData(_ advertisementData: [AnyHashable: Any], rssi: Double, identifier: String) -> Beacon? {
+    class func beaconWithAdvertisementData(_ advertisementData: [AnyHashable: Any], rssi: Int, identifier: String) -> Beacon? {
         var txPower: Int?
         var type: FrameType?
 
@@ -192,7 +198,7 @@ open class Beacon {
         if bytes.count >= 2 {
             if let type = Beacon.frameTypeFromBytes(bytes) {
                 if type == .uid || type == .url {
-                    return Int(bytes[1])
+                    return Int(Int8(bitPattern: UInt8(bytes[1])))
                 }
             }
         }
@@ -204,3 +210,4 @@ open class Beacon {
 protocol BeaconDelegate {
     func beaconDidChange()
 }
+
